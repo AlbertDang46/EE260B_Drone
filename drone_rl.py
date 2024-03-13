@@ -1,12 +1,10 @@
-import unittest
 import rospy
 import math
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped, Twist, Point
 from mavros_msgs.msg import Altitude, ExtendedState, HomePosition, ParamValue, State, WaypointList
 from mavros_msgs.srv import CommandBool, ParamGet, ParamSet, SetMode, SetModeRequest, WaypointClear, WaypointPush
 from pymavlink import mavutil
 from sensor_msgs.msg import NavSatFix, Imu
-from six.moves import xrange
 
 import numpy as np
 import torch
@@ -21,26 +19,29 @@ class Drone_Environment:
         self.setup()
 
     # Wait for drone services to come online and setup telemetry
-    def setup(self):
+    def setup(self, goal_pos):
+        # Drone telemetry
         self.altitude = Altitude()
         self.extended_state = ExtendedState()
         self.global_position = NavSatFix()
         self.home_position = HomePosition()
         self.local_position = PoseStamped()
+        self.local_velocity = TwistStamped()
         self.mission_wp = WaypointList()
         self.state = State()
         self.imu_data = Imu()
         self.mav_type = None
 
+        # Ready states of drone telemetry
         self.sub_topics_ready = {
             key: False
             for key in [
-                'alt', 'ext_state', 'global_pos', 'home_pos', 'local_pos',
-                'mission_wp', 'state', 'imu'
+                'alt', 'ext_state', 'global_pos', 'home_pos', 'local_pos', 
+                'local_vel', 'mission_wp', 'state', 'imu'
             ]
         }
 
-        # ROS services
+        # MAVROS services
         service_timeout = 30
         rospy.loginfo("Waiting for ROS services")
         try:
@@ -54,6 +55,7 @@ class Drone_Environment:
         except rospy.ROSException:
             self.fail("failed to connect to services")
 
+        # Methods to communicate with MAVROS services
         self.get_param_srv = rospy.ServiceProxy('mavros/param/get', ParamGet)
         self.set_param_srv = rospy.ServiceProxy('mavros/param/set', ParamSet)
         self.set_arming_srv = rospy.ServiceProxy('mavros/cmd/arming', CommandBool)
@@ -61,15 +63,30 @@ class Drone_Environment:
         self.wp_push_srv = rospy.ServiceProxy('mavros/mission/push', WaypointPush)
         self.wp_clear_srv = rospy.ServiceProxy('mavros/mission/clear', WaypointClear)
 
-        # ROS subscribers
+        # MAVROS subscribers
         self.alt_sub = rospy.Subscriber('mavros/altitude', Altitude, self.altitude_callback)
         self.ext_state_sub = rospy.Subscriber('mavros/extended_state', ExtendedState, self.extended_state_callback)
         self.global_pos_sub = rospy.Subscriber('mavros/global_position/global', NavSatFix, self.global_position_callback)
         self.home_pos_sub = rospy.Subscriber('mavros/home_position/home', HomePosition, self.home_position_callback)
         self.local_pos_sub = rospy.Subscriber('mavros/local_position/pose', PoseStamped, self.local_position_callback)
+        self.local_vel_sub = rospy.Subscriber('mavros/local_position/velocity', TwistStamped, self.local_velocity_callback)
         self.mission_wp_sub = rospy.Subscriber('mavros/mission/waypoints', WaypointList, self.mission_wp_callback)
         self.state_sub = rospy.Subscriber('mavros/state', State, self.state_callback)
         self.imu_data_sub = rospy.Subscriber('mavros/imu/data', Imu, self.imu_data_callback)
+
+        # MAVROS publishers
+        self.vel_setpoint_pub = rospy.Publisher('mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
+
+        # Reinforcement learning parameters
+        self.hertz = 10
+        self.rate = rospy.Rate(self.hertz)
+        self.timestep = 0
+        self.goal_pos = goal_pos
+        self.goal_threshold = 0.2
+        self.prev_dist_to_goal = 0
+        self.time_penalty_factor = 1.05
+        self.max_timesteps = 200
+        
 
     def tearDown(self):
         self.log_topic_vars()
@@ -116,6 +133,12 @@ class Drone_Environment:
         if not self.sub_topics_ready['local_pos']:
             self.sub_topics_ready['local_pos'] = True
 
+    def local_velocity_callback(self, data):
+        self.local_velocity = data
+
+        if not self.sub_topics_ready['local_vel']:
+            self.sub_topics_ready['local_vel'] = True
+
     def mission_wp_callback(self, data):
         if self.mission_wp.current_seq != data.current_seq:
             rospy.loginfo("current mission waypoint sequence updated: {0}".format(data.current_seq))
@@ -160,7 +183,7 @@ class Drone_Environment:
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
         arm_set = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             if self.state.armed == arm:
                 arm_set = True
                 rospy.loginfo("set arm success | seconds: {0} of {1}".format(i / loop_freq, timeout))
@@ -188,7 +211,7 @@ class Drone_Environment:
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
         mode_set = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             if self.state.mode == mode:
                 mode_set = True
                 rospy.loginfo("set mode success | seconds: {0} of {1}".format(i / loop_freq, timeout))
@@ -218,7 +241,7 @@ class Drone_Environment:
         rospy.loginfo("setting PX4 parameter: {0} with value {1}".format(param_id, value))
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             try:
                 res = self.set_param_srv(param_id, param_value)
                 if res.success:
@@ -243,7 +266,7 @@ class Drone_Environment:
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
         simulation_ready = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             if all(value for value in self.sub_topics_ready.values()):
                 simulation_ready = True
                 rospy.loginfo("simulation topics ready | seconds: {0} of {1}".format(i / loop_freq, timeout))
@@ -264,7 +287,7 @@ class Drone_Environment:
         loop_freq = 10  # Hz
         rate = rospy.Rate(loop_freq)
         landed_state_confirmed = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             if self.extended_state.landed_state == desired_landed_state:
                 landed_state_confirmed = True
                 rospy.loginfo("landed state confirmed | seconds: {0} of {1}".format(i / loop_freq, timeout))
@@ -289,7 +312,7 @@ class Drone_Environment:
         loop_freq = 10  # Hz
         rate = rospy.Rate(loop_freq)
         transitioned = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             if self.extended_state.vtol_state == transition:
                 rospy.loginfo("transitioned | seconds: {0} of {1}".format(i / loop_freq, timeout))
                 transitioned = True
@@ -312,7 +335,7 @@ class Drone_Environment:
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
         wps_cleared = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             if not self.mission_wp.waypoints:
                 wps_cleared = True
                 rospy.loginfo("clear waypoints success | seconds: {0} of {1}".format(i / loop_freq, timeout))
@@ -342,7 +365,7 @@ class Drone_Environment:
         rate = rospy.Rate(loop_freq)
         wps_sent = False
         wps_verified = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             if not wps_sent:
                 try:
                     res = self.wp_push_srv(start_index=0, waypoints=waypoints)
@@ -374,7 +397,7 @@ class Drone_Environment:
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
         res = False
-        for i in xrange(timeout * loop_freq):
+        for i in range(timeout * loop_freq):
             try:
                 res = self.get_param_srv('MAV_TYPE')
                 if res.success:
@@ -413,17 +436,49 @@ class Drone_Environment:
         rospy.loginfo("state:\n{}".format(self.state))
         rospy.loginfo("========================")
 
-    # De-arm and re-arm drone and reset drone position
+    # Set drone velocity to 0 and reset drone position
     def reset(self):
-        print("reset")
+        zero_vel = Twist()
+        zero_vel.linear.x = 0
+        zero_vel.linear.y = 0
+        zero_vel.linear.z = 0
+        zero_vel.angular.x = 0
+        zero_vel.angular.y = 0
+        zero_vel.angular.z = 0
+        
+        self.vel_setpoint_pub.publish(zero_vel)
+        self.rate.sleep()
+        # TODO: Use Gazebo command to reset drone position
+        
+        local_pos = self.local_position.pose.point
+        local_vel = self.local_velocity.twist.linear
+        reset_state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
 
-    #
-    def step(self):
-        print("step")
+        return reset_state
 
-    # De-arm drone and reset drone position
+    def step(self, velocity):
+        self.vel_setpoint_pub.publish(velocity)
+        self.rate.sleep()
+        self.timestep += 1
+        
+        local_pos = self.local_position.pose.point
+        local_vel = self.local_velocity.twist.linear
+        new_state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
+
+        dist_to_goal = math.dist([local_pos.x, local_pos.y, local_pos.z], self.goal)
+        reward = self.prev_dist_to_goal - dist_to_goal - ((1.0 / self.hertz) * self.time_penalty_factor**self.timestep)
+        
+        terminated = dist_to_goal < self.goal_threshold  # TODO: also check for collision with obstacles or floor
+        truncated = self.timestep >= self.max_timesteps
+
+        return (new_state, reward, terminated, truncated)
+        
+    # Auto-land, de-arm, and reset drone position
     def shutdown(self):
-        print("shutdown")
+        self.set_mode('AUTO.LAND', 5)
+        self.wait_for_landed_state(mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND, 90, 0)
+        self.set_arm(False, 5)
+        # TODO: Use Gazebo command to reset drone position
        
 
 class Drone_Policy_Network(nn.Module):
