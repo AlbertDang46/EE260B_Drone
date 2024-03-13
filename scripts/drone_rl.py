@@ -469,11 +469,7 @@ class Drone_Environment:
         self.rate.sleep()
         # TODO: Use Gazebo command to reset drone position
         
-        local_pos = self.drone_control.local_position.pose.point
-        local_vel = self.drone_control.local_velocity.twist.linear
-        reset_state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
-
-        return reset_state
+        return self.get_drone_state()
 
     def step(self, velocity_action):
         vel = Twist()
@@ -488,20 +484,26 @@ class Drone_Environment:
         self.rate.sleep()
         self.timestep += 1
         
-        local_pos = self.drone_control.local_position.pose.point
-        local_vel = self.drone_control.local_velocity.twist.linear
-        next_state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
+        next_state = self.get_drone_state()
 
-        dist_to_goal = math.dist([local_pos.x, local_pos.y, local_pos.z], self.goal_pos)
-        reward = self.prev_dist_to_goal - dist_to_goal - ((1.0 / self.hertz) * self.time_penalty_factor**self.timestep)
+        cur_pos = next_state[0:3].tolist()
+        cur_dist_to_goal = math.dist(cur_pos, self.goal_pos)
+        reward = self.prev_dist_to_goal - cur_dist_to_goal - ((1.0 / self.hertz) * self.time_penalty_factor**self.timestep)
         
-        terminated = dist_to_goal < self.goal_threshold  # TODO: also check for collisions with obstacles or floor
+        terminated = cur_dist_to_goal < self.goal_threshold  # TODO: also check for collisions with obstacles or floor
         truncated = self.timestep >= self.max_timesteps
 
         return (next_state, reward, terminated, truncated)
+    
+    def get_drone_state(self):
+        local_pos = self.drone_control.local_position.pose.point
+        local_vel = self.drone_control.local_velocity.twist.linear
+        state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
+
+        return state
         
     # Shutdown drone and reset drone position
-    def shutdown(self):
+    def close(self):
         self.drone_control.shutDown()
         # TODO: Use Gazebo command to reset drone position
        
@@ -665,4 +667,4 @@ for episode in range(total_num_episodes):
     print_neural_net_parameters("Means Net Parameters: " + str(drone_agent.net.policy_mean_net))
     print_neural_net_parameters("StdDevs Net Parameters: " + str(drone_agent.net.policy_stddev_net))
 
-drone_env.shutdown()
+drone_env.close()
