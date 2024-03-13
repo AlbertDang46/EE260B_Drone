@@ -1,7 +1,8 @@
 #! /usr/bin/env python
+import math
+from threading import Thread
 
 import rospy
-import math
 from geometry_msgs.msg import PoseStamped, TwistStamped, Twist, Point
 from mavros_msgs.msg import Altitude, ExtendedState, HomePosition, ParamValue, State, WaypointList
 from mavros_msgs.srv import CommandBool, ParamGet, ParamSet, SetMode, SetModeRequest, WaypointClear, WaypointPush
@@ -78,8 +79,31 @@ class Drone_Control:
 
     # Switch to offboard mode and arm the drone
     def startUp(self):
+        send_setpoints_thread = Thread(target=self.send_setpoints, args=())
+        send_setpoints_thread.daemon = True
+        send_setpoints_thread.start()
+
         self.set_mode('OFFBOARD', 5)
         self.set_arm(True, 5)
+        send_setpoints_thread.join()
+
+    def send_setpoints(self):
+        rate = rospy.Rate(10)
+        zero_vel = Twist()
+        zero_vel.linear.x = 0
+        zero_vel.linear.y = 0
+        zero_vel.linear.z = 0
+        zero_vel.angular.x = 0
+        zero_vel.angular.y = 0
+        zero_vel.angular.z = 0
+
+        start_time = rospy.Time.now()
+        while not rospy.is_shutdown() and (rospy.Time.now() - start_time) < rospy.Duration(15.0):
+            self.vel_setpoint_pub.publish(zero_vel)
+            try:
+                rate.sleep()
+            except rospy.ROSInterruptException:
+                pass
 
     # Auto-land and de-arm drone
     def shutDown(self):
@@ -204,22 +228,6 @@ class Drone_Control:
     def set_mode(self, mode, timeout):
         """mode: PX4 mode string, timeout(int): seconds"""
         rospy.loginfo("setting FCU mode: {0}".format(mode))
-
-        fast_rate = rospy.Rate(20)
-        vel = Twist()
-        vel.linear.x = 0
-        vel.linear.y = 0
-        vel.lienar.z = 0
-        vel.angular.x = 0
-        vel.angular.y = 0
-        vel.angular.z = 0
-        for _ in range(100):
-            if rospy.is_shutdown():
-                break
-
-            self.vel_setpoint_pub.publish(vel)
-            fast_rate.sleep()
-
         old_mode = self.state.mode
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
