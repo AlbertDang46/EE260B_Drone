@@ -3,7 +3,9 @@ import math
 from threading import Thread
 
 import rospy
-from geometry_msgs.msg import PoseStamped, TwistStamped, Twist, Point
+from gazebo_msgs.srv import SetModelState
+from gazebo_msgs.msg import ModelState
+from geometry_msgs.msg import PoseStamped, Pose, TwistStamped, Twist, Point
 from mavros_msgs.msg import Altitude, ExtendedState, HomePosition, ParamValue, State, WaypointList
 from mavros_msgs.srv import CommandBool, ParamGet, ParamSet, SetMode, SetModeRequest, WaypointClear, WaypointPush
 from pymavlink import mavutil
@@ -429,7 +431,22 @@ class Drone_Environment:
     """Reinforcement learning for PX4 drone with ROS/Gazebo"""
 
     # Initialize reinforcement learning parameters
-    def __init__(self, goal_pos=[50.0, 60.0, 5.0]):
+    def __init__(self, goal_pos=[10.0, 10.0, 3.0]):
+        rospy.loginfo("Waiting for Gazebo ROS service")
+        try:
+            rospy.wait_for_service('gazebo/set_model_state', 30)
+            rospy.loginfo("Gazebo ROS service is up")
+        except rospy.ROSException:
+            self.fail("failed to connect to Gazebo service")
+
+        self.set_model_state_srv = rospy.ServiceProxy('gazebo/set_model_state', SetModelState)
+
+        self.init_model_state = ModelState()
+        self.init_model_state.model_name = "iris"
+        self.init_model_state.pose.position.x = 0.0
+        self.init_model_state.pose.position.y = 0.0
+        self.init_model_state.pose.position.z = 0.0
+
         self.drone_control = Drone_Control()
         self.drone_control.startUp()
 
@@ -456,7 +473,7 @@ class Drone_Environment:
         
         self.drone_control.vel_setpoint_pub.publish(zero_vel)
         self.rate.sleep()
-        # TODO: Use Gazebo command to reset drone position
+        self.set_model_state_srv(self.init_model_state)
         
         return self.get_drone_state()
 
@@ -494,7 +511,7 @@ class Drone_Environment:
     # Shutdown drone and reset drone position
     def close(self):
         self.drone_control.shutDown()
-        # TODO: Use Gazebo command to reset drone position
+        self.set_model_state_srv(self.init_model_state)
        
 
 class Drone_Policy_Network(nn.Module):
