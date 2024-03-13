@@ -441,11 +441,13 @@ class Drone_Environment:
 
         self.set_model_state_srv = rospy.ServiceProxy('gazebo/set_model_state', SetModelState)
 
+        self.init_drone_pos = [0.0, 0.0, 2.0]
+
         self.init_model_state = ModelState()
         self.init_model_state.model_name = "iris"
-        self.init_model_state.pose.position.x = 0.0
-        self.init_model_state.pose.position.y = 0.0
-        self.init_model_state.pose.position.z = 2.0
+        self.init_model_state.pose.position.x = self.init_drone_pos[0]
+        self.init_model_state.pose.position.y = self.init_drone_pos[1]
+        self.init_model_state.pose.position.z = self.init_drone_pos[2]
 
         self.drone_control = Drone_Control()
         self.drone_control.startUp()
@@ -459,10 +461,13 @@ class Drone_Environment:
 
         self.goal_pos = goal_pos
         self.goal_threshold = 0.2   # Scenario successfully terminates if drone reaches the goal within this threshold
-        self.prev_dist_to_goal = 0.0
+        self.prev_dist_to_goal = math.dist(self.init_drone_pos, self.goal_pos)
         
     # Set drone velocity to 0 and reset drone position
     def reset(self):
+        self.timestep = 0
+        self.prev_dist_to_goal = math.dist(self.init_drone_pos, self.goal_pos)
+
         zero_vel = Twist()
         zero_vel.linear.x = 0
         zero_vel.linear.y = 0
