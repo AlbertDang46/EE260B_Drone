@@ -500,6 +500,8 @@ class Drone_Environment:
         cur_pos = next_state[0:3].tolist()
         cur_dist_to_goal = math.dist(cur_pos, self.goal_pos)
         reward = self.prev_dist_to_goal - cur_dist_to_goal - ((1.0 / self.hertz) * self.time_penalty_factor**self.timestep)
+
+        self.prev_dist_to_goal = cur_dist_to_goal
         
         terminated = cur_dist_to_goal < self.goal_threshold  # TODO: also check for collisions with obstacles or floor
         truncated = self.timestep >= self.max_timesteps
