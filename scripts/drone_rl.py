@@ -12,14 +12,11 @@ import torch.nn as nn
 from torch.distributions.normal import Normal
 
 
-class Drone_Environment:
-    """PX4 + Gazebo drone environment for reinforcement learning"""
-
-    def __init__(self):
-        self.setup()
+class Drone_Control:
+    """PX4 + Gazebo drone control class"""
 
     # Wait for drone services to come online and setup telemetry
-    def setup(self, goal_pos):
+    def __init__(self):
         # Drone telemetry
         self.altitude = Altitude()
         self.extended_state = ExtendedState()
@@ -77,16 +74,17 @@ class Drone_Environment:
         # MAVROS publishers
         self.vel_setpoint_pub = rospy.Publisher('mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
 
-        # Reinforcement learning parameters
-        self.hertz = 10
-        self.rate = rospy.Rate(self.hertz)
-        self.timestep = 0
-        self.goal_pos = goal_pos
-        self.goal_threshold = 0.2
-        self.prev_dist_to_goal = 0
-        self.time_penalty_factor = 1.05
-        self.max_timesteps = 200
-        
+    # Switch to offboard mode and arm the drone
+    def startUp(self):
+        self.set_mode("OFFBOARD", 5)
+        self.set_arm(True, 5)
+
+    # Auto-land and de-arm drone
+    def shutDown(self):
+        self.set_mode('AUTO.LAND', 5)
+        self.wait_for_landed_state(mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND, 90, 0)
+        self.set_arm(False, 5)
+        self.tearDown()
 
     def tearDown(self):
         self.log_topic_vars()
@@ -229,8 +227,8 @@ class Drone_Environment:
             except rospy.ROSException as e:
                 self.fail(e)
 
-        self.assertTrue(mode_set, (
-            "failed to set mode | new mode: {0}, old mode: {1} | timeout(seconds): {2}".format(mode, old_mode, timeout)))
+        self.assertTrue(mode_set, 
+            "failed to set mode | new mode: {0}, old mode: {1} | timeout(seconds): {2}".format(mode, old_mode, timeout))
         
     def set_param(self, param_id, param_value, timeout):
         """param: PX4 param string, ParamValue, timeout(int): seconds"""
@@ -255,8 +253,8 @@ class Drone_Environment:
             except rospy.ROSException as e:
                 self.fail(e)
 
-        self.assertTrue(res.success, (
-            "failed to set param | param_id: {0}, param_value: {1} | timeout(seconds): {2}".format(param_id, value, timeout)))
+        self.assertTrue(res.success, 
+            "failed to set param | param_id: {0}, param_value: {1} | timeout(seconds): {2}".format(param_id, value, timeout))
 
     def wait_for_topics(self, timeout):
         """wait for simulation to be ready, make sure we're getting topic info
@@ -277,9 +275,10 @@ class Drone_Environment:
             except rospy.ROSException as e:
                 self.fail(e)
 
-        self.assertTrue(simulation_ready, (
-            "failed to hear from all subscribed simulation topics | topic ready flags: {0} | timeout(seconds): {1}".
-                format(self.sub_topics_ready, timeout)))
+        self.assertTrue(simulation_ready, 
+            "failed to hear from all subscribed simulation topics | topic ready flags: {0} | timeout(seconds): {1}".format(
+                self.sub_topics_ready, 
+                timeout))
         
     def wait_for_landed_state(self, desired_landed_state, timeout, index):
         rospy.loginfo("waiting for landed state | state: {0}, index: {1}".format(
@@ -436,6 +435,26 @@ class Drone_Environment:
         rospy.loginfo("state:\n{}".format(self.state))
         rospy.loginfo("========================")
 
+
+class Drone_Environment:
+    """Reinforcement learning for PX4 drone with ROS/Gazebo"""
+
+    # Initialize reinforcement learning parameters
+    def __init__(self, goal_pos=[50.0, 60.0, 5.0]):
+        self.drone_control = Drone_Control()
+        self.drone_control.startUp()
+
+        self.hertz = 10
+        self.rate = rospy.Rate(self.hertz)
+
+        self.timestep = 0
+        self.time_penalty_factor = 1.05  # Reward penalty increases the more time has passed
+        self.max_timesteps = 200  # Scenario is truncated if too many timesteps have passed
+
+        self.goal_pos = goal_pos
+        self.goal_threshold = 0.2   # Scenario successfully terminates if drone reaches the goal within this threshold
+        self.prev_dist_to_goal = 0.0
+        
     # Set drone velocity to 0 and reset drone position
     def reset(self):
         zero_vel = Twist()
@@ -446,38 +465,44 @@ class Drone_Environment:
         zero_vel.angular.y = 0
         zero_vel.angular.z = 0
         
-        self.vel_setpoint_pub.publish(zero_vel)
+        self.drone_control.vel_setpoint_pub.publish(zero_vel)
         self.rate.sleep()
         # TODO: Use Gazebo command to reset drone position
         
-        local_pos = self.local_position.pose.point
-        local_vel = self.local_velocity.twist.linear
+        local_pos = self.drone_control.local_position.pose.point
+        local_vel = self.drone_control.local_velocity.twist.linear
         reset_state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
 
         return reset_state
 
-    def step(self, velocity):
-        self.vel_setpoint_pub.publish(velocity)
+    def step(self, velocity_action):
+        vel = Twist()
+        vel.linear.x = velocity_action[0]
+        vel.linear.y = velocity_action[1]
+        vel.linear.z = velocity_action[2]
+        vel.angular.x = 0
+        vel.angular.y = 0
+        vel.angular.z = 0
+
+        self.drone_control.vel_setpoint_pub.publish(vel)
         self.rate.sleep()
         self.timestep += 1
         
-        local_pos = self.local_position.pose.point
-        local_vel = self.local_velocity.twist.linear
-        new_state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
+        local_pos = self.drone_control.local_position.pose.point
+        local_vel = self.drone_control.local_velocity.twist.linear
+        next_state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
 
-        dist_to_goal = math.dist([local_pos.x, local_pos.y, local_pos.z], self.goal)
+        dist_to_goal = math.dist([local_pos.x, local_pos.y, local_pos.z], self.goal_pos)
         reward = self.prev_dist_to_goal - dist_to_goal - ((1.0 / self.hertz) * self.time_penalty_factor**self.timestep)
         
-        terminated = dist_to_goal < self.goal_threshold  # TODO: also check for collision with obstacles or floor
+        terminated = dist_to_goal < self.goal_threshold  # TODO: also check for collisions with obstacles or floor
         truncated = self.timestep >= self.max_timesteps
 
-        return (new_state, reward, terminated, truncated)
+        return (next_state, reward, terminated, truncated)
         
-    # Auto-land, de-arm, and reset drone position
+    # Shutdown drone and reset drone position
     def shutdown(self):
-        self.set_mode('AUTO.LAND', 5)
-        self.wait_for_landed_state(mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND, 90, 0)
-        self.set_arm(False, 5)
+        self.drone_control.shutDown()
         # TODO: Use Gazebo command to reset drone position
        
 
@@ -515,7 +540,7 @@ class Drone_Policy_Network(nn.Module):
             nn.Linear(hidden_space2, action_space_dims)
         )
 
-    def forward(self, input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, input: torch.Tensor):
         """Conditioned on the observation, returns the mean and standard deviation
         of a normal distribution from which an action is sampled from.
 
@@ -561,7 +586,7 @@ class Drone_REINFORCE:
         self.net = Drone_Policy_Network(obs_space_dims, action_space_dims)
         self.optimizer = torch.optim.AdamW(self.net.parameters(), lr=self.learning_rate)
 
-    def sample_action(self, state: np.ndarray) -> float:
+    def sample_action(self, state: np.ndarray):
         """Returns an action, conditioned on the policy and observation.
 
         Args:
@@ -617,10 +642,11 @@ def print_neural_net_parameters(neural_net):
 
 
 rospy.init_node("drone_rl_py")
+
 drone_env = Drone_Environment()
 total_num_episodes = 5000
 
-obs_space_dims = 6  # Drone State: x,y,z global coordinates and x,y,z linear velocities
+obs_space_dims = 6  # Drone State: x,y,z local coordinates and x,y,z linear velocities
 action_space_dims = 3   # Drone Action: x,y,z linear velocities
 drone_agent = Drone_REINFORCE(obs_space_dims, action_space_dims)
 
