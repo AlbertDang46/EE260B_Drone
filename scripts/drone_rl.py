@@ -93,9 +93,9 @@ class Drone_Control:
     def send_setpoints(self):
         rate = rospy.Rate(10)
         pose = PoseStamped()
-        pose.pose.position.x = 0
-        pose.pose.position.y = 0
-        pose.pose.position.z = 2
+        pose.pose.position.x = 0.0
+        pose.pose.position.y = 0.0
+        pose.pose.position.z = 2.0
 
         start_time = rospy.Time.now()
         while not rospy.is_shutdown() and (rospy.Time.now() - start_time) < rospy.Duration(15.0):
@@ -445,7 +445,7 @@ class Drone_Environment:
         self.init_model_state.model_name = "iris"
         self.init_model_state.pose.position.x = 0.0
         self.init_model_state.pose.position.y = 0.0
-        self.init_model_state.pose.position.z = 0.0
+        self.init_model_state.pose.position.z = 2.0
 
         self.drone_control = Drone_Control()
         self.drone_control.startUp()
