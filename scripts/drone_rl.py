@@ -487,7 +487,7 @@ class Drone_Environment:
         return (next_state, reward, terminated, truncated)
     
     def get_drone_state(self):
-        local_pos = self.drone_control.local_position.pose.point
+        local_pos = self.drone_control.local_position.pose.position
         local_vel = self.drone_control.local_velocity.twist.linear
         state = np.array([local_pos.x, local_pos.y, local_pos.z, local_vel.x, local_vel.y, local_vel.z])
 
