@@ -642,29 +642,31 @@ def print_neural_net_parameters(neural_net):
     for param in neural_net.parameters():
         print(type(param), param.size(), param)
 
+# Drone State: x,y,z local coordinates and x,y,z linear velocities
+# Drone Action: x,y,z linear velocities
+def run_drone_rl(total_num_episodes=5000, obs_space_dims=6, action_space_dims=3, print_nn_params=True):
+    drone_env = Drone_Environment()
+    drone_agent = Drone_REINFORCE(obs_space_dims, action_space_dims)
 
-rospy.init_node("drone_rl_py")
+    for _ in range(total_num_episodes):
+        obs = drone_env.reset()
 
-drone_env = Drone_Environment()
-total_num_episodes = 5000
+        done = False
+        while not done:
+            action = drone_agent.sample_action(obs)
+            obs, reward, terminated, truncated = drone_env.step(action)
+            drone_agent.rewards.append(reward)
+            done = terminated or truncated
+        
+        drone_agent.update()
 
-obs_space_dims = 6  # Drone State: x,y,z local coordinates and x,y,z linear velocities
-action_space_dims = 3   # Drone Action: x,y,z linear velocities
-drone_agent = Drone_REINFORCE(obs_space_dims, action_space_dims)
+        if print_nn_params:
+            print_neural_net_parameters("Shared Net Parameters: " + str(drone_agent.net.shared_net))
+            print_neural_net_parameters("Means Net Parameters: " + str(drone_agent.net.policy_mean_net))
+            print_neural_net_parameters("StdDevs Net Parameters: " + str(drone_agent.net.policy_stddev_net))
 
-for episode in range(total_num_episodes):
-    obs = drone_env.reset()
+    drone_env.close()
 
-    done = False
-    while not done:
-        action = drone_agent.sample_action(obs)
-        obs, reward, terminated, truncated = drone_env.step(action)
-        drone_agent.rewards.append(reward)
-        done = terminated or truncated
-    
-    drone_agent.update()
-    print_neural_net_parameters("Shared Net Parameters: " + str(drone_agent.net.shared_net))
-    print_neural_net_parameters("Means Net Parameters: " + str(drone_agent.net.policy_mean_net))
-    print_neural_net_parameters("StdDevs Net Parameters: " + str(drone_agent.net.policy_stddev_net))
-
-drone_env.close()
+if __name__ == '__main__':
+    rospy.init_node("drone_rl_py")
+    run_drone_rl()
