@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+
 import rospy
 import math
 from geometry_msgs.msg import PoseStamped, TwistStamped, Twist, Point
@@ -76,7 +78,7 @@ class Drone_Control:
 
     # Switch to offboard mode and arm the drone
     def startUp(self):
-        self.set_mode("OFFBOARD", 5)
+        self.set_mode('OFFBOARD', 5)
         self.set_arm(True, 5)
 
     # Auto-land and de-arm drone
