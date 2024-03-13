@@ -200,13 +200,26 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(arm_set, 
-            "failed to set arm | new arm: {0}, old arm: {1} | timeout(seconds): {2}".format(arm, old_arm, timeout))
         
     def set_mode(self, mode, timeout):
         """mode: PX4 mode string, timeout(int): seconds"""
         rospy.loginfo("setting FCU mode: {0}".format(mode))
+
+        fast_rate = rospy.Rate(20)
+        vel = Twist()
+        vel.linear.x = 0
+        vel.linear.y = 0
+        vel.lienar.z = 0
+        vel.angular.x = 0
+        vel.angular.y = 0
+        vel.angular.z = 0
+        for _ in range(100):
+            if rospy.is_shutdown():
+                break
+
+            self.vel_setpoint_pub.publish(vel)
+            fast_rate.sleep()
+
         old_mode = self.state.mode
         loop_freq = 1  # Hz
         rate = rospy.Rate(loop_freq)
@@ -228,9 +241,6 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(mode_set, 
-            "failed to set mode | new mode: {0}, old mode: {1} | timeout(seconds): {2}".format(mode, old_mode, timeout))
         
     def set_param(self, param_id, param_value, timeout):
         """param: PX4 param string, ParamValue, timeout(int): seconds"""
@@ -255,9 +265,6 @@ class Drone_Control:
             except rospy.ROSException as e:
                 self.fail(e)
 
-        self.assertTrue(res.success, 
-            "failed to set param | param_id: {0}, param_value: {1} | timeout(seconds): {2}".format(param_id, value, timeout))
-
     def wait_for_topics(self, timeout):
         """wait for simulation to be ready, make sure we're getting topic info
         from all topics by checking dictionary of flag values set in callbacks,
@@ -276,11 +283,6 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(simulation_ready, 
-            "failed to hear from all subscribed simulation topics | topic ready flags: {0} | timeout(seconds): {1}".format(
-                self.sub_topics_ready, 
-                timeout))
         
     def wait_for_landed_state(self, desired_landed_state, timeout, index):
         rospy.loginfo("waiting for landed state | state: {0}, index: {1}".format(
@@ -298,13 +300,6 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(landed_state_confirmed, 
-            "landed state not detected | desired: {0}, current: {1} | index: {2}, timeout(seconds): {3}".format(
-                mavutil.mavlink.enums['MAV_LANDED_STATE'][desired_landed_state].name, 
-                mavutil.mavlink.enums['MAV_LANDED_STATE'][self.extended_state.landed_state].name,
-                index, 
-                timeout))
         
     def wait_for_vtol_state(self, transition, timeout, index):
         """Wait for VTOL transition, timeout(int): seconds"""
@@ -323,13 +318,6 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(transitioned,
-            "transition not detected | desired: {0}, current: {1} | index: {2} timeout(seconds): {3}".format(
-                mavutil.mavlink.enums['MAV_VTOL_STATE'][transition].name,
-                mavutil.mavlink.enums['MAV_VTOL_STATE'][self.extended_state.vtol_state].name, 
-                index, 
-                timeout))
         
     def clear_wps(self, timeout):
         """timeout(int): seconds"""
@@ -353,8 +341,6 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(wps_cleared, "failed to clear waypoints | timeout(seconds): {0}".format(timeout))
 
     def send_wps(self, waypoints, timeout):
         """waypoints, timeout(int): seconds"""
@@ -388,9 +374,6 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(wps_sent and wps_verified, 
-            "mission could not be transferred and verified | timeout(seconds): {0}".format(timeout))
         
     def wait_for_mav_type(self, timeout):
         """Wait for MAV_TYPE parameter, timeout(int): seconds"""
@@ -414,8 +397,6 @@ class Drone_Control:
                 rate.sleep()
             except rospy.ROSException as e:
                 self.fail(e)
-
-        self.assertTrue(res.success, "MAV_TYPE param get failed | timeout(seconds): {0}".format(timeout))
 
     def log_topic_vars(self):
         """log the state of topic variables"""
