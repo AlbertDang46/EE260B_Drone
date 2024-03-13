@@ -652,9 +652,12 @@ def run_drone_rl(total_num_episodes=5000, obs_space_dims=6, action_space_dims=3,
         drone_agent.update()
 
         if print_nn_params:
-            print_neural_net_parameters("Shared Net Parameters: " + str(drone_agent.net.shared_net))
-            print_neural_net_parameters("Means Net Parameters: " + str(drone_agent.net.policy_mean_net))
-            print_neural_net_parameters("StdDevs Net Parameters: " + str(drone_agent.net.policy_stddev_net))
+            print("Shared Net Parameters: ")
+            print_neural_net_parameters(drone_agent.net.shared_net)
+            print("Means Net Parameters: ")
+            print_neural_net_parameters(drone_agent.net.policy_mean_net)
+            print("StdDevs Net Parameters: ")
+            print_neural_net_parameters(drone_agent.net.policy_stddev_net)
 
     drone_env.close()
 
