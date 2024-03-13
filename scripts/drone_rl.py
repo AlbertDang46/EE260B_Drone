@@ -75,6 +75,7 @@ class Drone_Control:
         self.imu_data_sub = rospy.Subscriber('mavros/imu/data', Imu, self.imu_data_callback)
 
         # MAVROS publishers
+        self.pos_setpoint_pub = rospy.Publisher('mavros/setpoint_position/local', PoseStamped, queue_size=1)
         self.vel_setpoint_pub = rospy.Publisher('mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
 
     # Switch to offboard mode and arm the drone
@@ -89,17 +90,14 @@ class Drone_Control:
 
     def send_setpoints(self):
         rate = rospy.Rate(10)
-        zero_vel = Twist()
-        zero_vel.linear.x = 0
-        zero_vel.linear.y = 0
-        zero_vel.linear.z = 0
-        zero_vel.angular.x = 0
-        zero_vel.angular.y = 0
-        zero_vel.angular.z = 0
+        pose = PoseStamped()
+        pose.pose.position.x = 0
+        pose.pose.position.y = 0
+        pose.pose.position.z = 2
 
         start_time = rospy.Time.now()
         while not rospy.is_shutdown() and (rospy.Time.now() - start_time) < rospy.Duration(15.0):
-            self.vel_setpoint_pub.publish(zero_vel)
+            self.pos_setpoint_pub.publish(pose)
             try:
                 rate.sleep()
             except rospy.ROSInterruptException:
