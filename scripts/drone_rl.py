@@ -616,6 +616,7 @@ def print_neural_net_parameters(neural_net):
         print(type(param), param.size(), param)
 
 
+rospy.init_node("drone_rl_py")
 drone_env = Drone_Environment()
 total_num_episodes = 5000
 
